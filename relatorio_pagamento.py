@@ -10,16 +10,20 @@ root = Tk()
 root.withdraw()
 root.attributes('-topmost', True)
 
+possible_desktops = list(Path.home().glob("**/Desktop"))
+
 nome_arquivo = Path(simpledialog.askstring('Nome do Arquivo','Escolha o nome do seu arquivo')).with_suffix('.xlsx')
 
-pasta = Path(filedialog.askdirectory(title='Qual pasta deseja usar?'))
-# pasta = Path(r"C:\\Users\\gustavo.pinheiro\\OneDrive - DISTRIBUIDORA DE MEDICAMENTOS SANTA CRUZ LTDA\Automações pessoais\\Relatórios de pagamento")
+# pasta = Path(filedialog.askdirectory(title='Qual pasta deseja usar?'))
+pasta = Path(r"C:\\Users\\gustavo.pinheiro\\OneDrive - DISTRIBUIDORA DE MEDICAMENTOS SANTA CRUZ LTDA\Automações pessoais\\Relatórios de pagamento")
 
 #para onde o arquivo será salvo
-salvo_em = filedialog.askdirectory(title='Onde deseja salvar o seu relatório?')
+# salvo_em = filedialog.askdirectory(title='Onde deseja salvar o seu relatório?')
 # salvo_em = Path(r"C:\\Users\\gustavo.pinheiro\\OneDrive - DISTRIBUIDORA DE MEDICAMENTOS SANTA CRUZ LTDA\\Desktop\\")
+salvo_em = possible_desktops
 
-arquivo_final = salvo_em / nome_arquivo
+arquivo_final = salvo_em[0] / nome_arquivo
+print(arquivo_final)
 
 arqvs = list(pasta.rglob('*.xls'))
 
