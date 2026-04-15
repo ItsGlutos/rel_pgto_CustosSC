@@ -1,155 +1,260 @@
-from pathlib import Path
-from tkinter import Tk, filedialog, messagebox, simpledialog
-import os
+import xlsxwriter.utility
+import re
 import ctypes
-import openpyxl
-
-ctypes.windll.shcore.SetProcessDpiAwareness(1)
-
-root = Tk()
-root.withdraw()
-root.attributes('-topmost', True)
-
-# comparação entre a primeira linha de cada relatório:
-# fbl1n
-comp1 = [None, None, 'St', 'Empresa', 'Fornecedo', None, 'LNeg', 'Referência', 'Nº documento', 'Data doc.', 'Doc.compensação', '   Mont.em MI', 'Vencimento', 'Texto', 'Tipo', 'GrpPrevTes', 'Compensaç.', 'BlP', 'Usuário']
-# rel_log
-comp2 = [None, 'Empresa', 'Loc.Neg', 'Fornecedor', 'Doc.Cont', None, None, 'Dat.Doc', 'Referência', 'Dt.Pagto', 'Tp.Doc', 'BIP', 'Montant.MI', 'Texto', 'Doc.Compen', 'Dat.Compen', 'Doc.MIRO', None, 'Dt.Process', 'Msg.LOG']
-
-possible_desktops = list(Path.home().glob("**/Desktop"))
-
-nome_arquivo = Path(simpledialog.askstring('Nome do Arquivo','Escolha o nome do seu arquivo')).with_suffix('.xlsx')
-
-pasta = Path(filedialog.askdirectory(title='Qual pasta deseja usar?'))
-
-#para onde o arquivo será salvo
-salvo_em = possible_desktops
-
-arquivo_final = salvo_em[0] / nome_arquivo
-arqvs = list(pasta.rglob('*.xls'))
-
-def tratamento(df):
-    first_line = list(df.iloc[0].where(pd.notnull(df.iloc[0]), None))
-    colunas_padrao = [
-        'Empresa', 'Fornecedor', 'LNeg', 'Referência', 'Nº documento', 
-        'Data doc.', 'Doc.compensação', 'Valor', 'Vencimento', 'Texto', 
-        'Tipo', 'Compensaç.', 'Blp'
-    ]
-
-    
-    if first_line == comp1:
-
-        df = df.drop(df.columns[[0, 1, 2, 5, 15, 18]], axis=1)
-        df = df.drop(index=0).reset_index(drop=True)
-
-        # define o cabeçalho
-        df.columns = colunas_padrao
-
-        df['Data doc.'] = df['Data doc.'].str.replace('.', '/')
-        df['Vencimento'] = df['Vencimento'].str.replace('.','/')
-
-        df['Valor'] = df['Valor'].str.replace('.','')
-        df['Valor'] = df['Valor'].str.replace(',','.')
-        df['Valor'] = df['Valor'].astype(float)
-
-        df = df[df['Tipo'].isin(['RE', 'KT','RF'])]
-        df['Valor'] = df['Valor']*(-1)
-
-    elif comp2 == first_line:
-
-        colunas_para_remover = df.columns[[0, 5, 6, 16, 17, 18, 19]]
-        df = df.drop(index=0).reset_index(drop=True)
-
-        colunas_renomeadas = {2:'LNeg',
-        9:'Vencimento',
-        10:'Tipo',
-        11:'Blp',
-        15:'Compensaç.',
-        12:'Valor',
-        14:'Doc.compensação',
-        7:'Data doc.',
-        3:'Fornecedor',
-        4:'Nº documento',
-        13:'Texto',
-        8:'Referência',
-        1:'Empresa'}
-
-        df = df.rename(columns=colunas_renomeadas)
-
-        df = df.drop(columns=colunas_para_remover)
-
-        df = df[['Empresa', 'Fornecedor', 'LNeg', 'Referência', 'Nº documento', 'Data doc.', 'Doc.compensação', 'Valor', 'Vencimento', 'Texto', 'Tipo', 'Compensaç.','Blp']]
-
-        df['Data doc.'] = df['Data doc.'].str.replace('.', '/')
-        df['Vencimento'] = df['Vencimento'].str.replace('.','/')
-
-        df['Valor'] = df['Valor'].str.replace('.','')
-        df['Valor'] = df['Valor'].str.replace(',','.')
-        df['Valor'] = df['Valor'].astype(float)
-
-        df = df[df['Tipo'].isin(['RE', 'KT','RF'])]
-
-    else:
-        messagebox.showerror("ERRO", "FORMATO DE ARQUIVO NÃO RECONHECIDO")
-        return None
-
-    return df
+import threading
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
 import pandas as pd
 
 try:
+    import customtkinter as ctk
+except ImportError:
+    messagebox.showerror("Erro de Dependência", "A biblioteca 'customtkinter' não está instalada.\nPor favor rode:\npip install customtkinter")
+    raise SystemExit
 
-    lista_dfs = []
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    pass
 
-    qtd_colunas = list(range(20))
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
-    for arq in arqvs:
+COMP1 = [None, None, 'St', 'Empresa', 'Fornecedo', None, 'LNeg', 'Referência', 'Nº documento', 'Data doc.', 'Doc.compensação', '   Mont.em MI', 'Vencimento', 'Texto', 'Tipo', 'GrpPrevTes', 'Compensaç.', 'BlP', 'Usuário']
+COMP2 = [None, 'Empresa', 'Loc.Neg', 'Fornecedor', 'Doc.Cont', None, None, 'Dat.Doc', 'Referência', 'Dt.Pagto', 'Tp.Doc', 'BIP', 'Montant.MI', 'Texto', 'Doc.Compen', 'Dat.Compen', 'Doc.MIRO', None, 'Dt.Process', 'Msg.LOG']
+COMP2_ALT = [None, 'Empresa', 'Loc.Neg', 'Fornecedor', 'Doc.Cont', None, None, 'Dat.Doc', 'Referência', 'Dt.Pagto', 'Tp.Doc', 'BIP', 'Montant.MI', 'Texto', 'Doc.Compen', 'Dat.Compen', 'Doc.Cont.MIRO', None, None, 'Dt.Process', 'Msg.LOG']
+COLUNAS_PADRAO = ['Empresa', 'Fornecedor', 'LNeg', 'Referência', 'Nº documento', 'Data doc.', 'Doc.compensação', 'Valor', 'Vencimento', 'Texto', 'Tipo', 'Compensaç.', 'Blp']
+TIPOS_VALIDOS = ['RE', 'KT', 'RF']
 
-        df_probe1 = pd.read_csv(arq, sep='\t', header=None, encoding='utf-16', nrows=1, skiprows=8)
-        df_probe2 = pd.read_csv(arq, sep='\t', header=None, encoding='utf-16', nrows=1, skiprows=3)
+_desktops = list(Path.home().glob("**/Desktop"))
+SALVO_EM = _desktops[0] if _desktops else Path.home()
 
-        first_line1 = list(df_probe1.iloc[0].where(pd.notnull(df_probe1.iloc[0]), None))
-        first_line2 = list(df_probe2.iloc[0].where(pd.notnull(df_probe2.iloc[0]), None))
+CSV_KWARGS = dict(sep='\t', header=None, encoding='utf-16')
 
-        if first_line1 == comp1:
 
-            df = pd.read_csv(arq, sep='\t',header=None ,encoding='utf-16', skiprows=8, dtype={
-                    8:str,
-                    10:str
-                })
-        elif first_line2 == comp2:
+def _formatar_df(df: pd.DataFrame, inverter_valor: bool) -> pd.DataFrame:
+    for col in ('Data doc.', 'Vencimento'):
+        df[col] = df[col].astype(str).str.replace('.', '/', regex=False)
+    df['Valor'] = pd.to_numeric(
+        df['Valor'].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False),
+        errors='coerce'
+    )
+    df = df[df['Tipo'].isin(TIPOS_VALIDOS)]
+    if inverter_valor:
+        df['Valor'] *= -1
+    return df
 
-            df = pd.read_csv(arq, sep='\t', skiprows=3, encoding='utf-16', index_col=False, header=None, names=qtd_colunas, engine='python')
-            # df = df.drop(index=0).reset_index(drop=True)
-            
+
+def tratamento(df: pd.DataFrame | None) -> pd.DataFrame | None:
+    if df is None or df.empty:
+        return None
+    first_line = list(df.iloc[0].where(pd.notnull(df.iloc[0]), None))
+
+    if first_line == COMP1:
+        df = df.drop(df.columns[[0, 1, 2, 5, 15, 18]], axis=1).iloc[1:].reset_index(drop=True)
+        df.columns = COLUNAS_PADRAO
+        return _formatar_df(df, inverter_valor=True)
+
+    if first_line in (COMP2, COMP2_ALT):
+        colunas_remover = df.columns[[0, 5, 6, 16, 17, 18, 19, 20] if first_line == COMP2_ALT else [0, 5, 6, 16, 17, 18, 19]]
+        df = df.iloc[1:].reset_index(drop=True).rename(columns={
+            1: 'Empresa', 2: 'LNeg', 3: 'Fornecedor', 4: 'Nº documento',
+            7: 'Data doc.', 8: 'Referência', 9: 'Vencimento', 10: 'Tipo',
+            11: 'Blp', 12: 'Valor', 13: 'Texto', 14: 'Doc.compensação', 15: 'Compensaç.'
+        }).drop(columns=colunas_remover)[COLUNAS_PADRAO]
+        return _formatar_df(df, inverter_valor=False)
+
+    return None
+
+
+def _ler_linha(arq: Path, skiprows: int) -> list:
+    df = pd.read_csv(arq, nrows=1, skiprows=skiprows, **CSV_KWARGS)
+    return list(df.iloc[0].where(pd.notnull(df.iloc[0]), None))
+
+
+def _nome_aba(valor) -> str:
+    nome = re.sub(r'[\\*?:/\[\]]', '-', str(valor))[:31]
+    return nome if nome and nome.lower() != 'nan' else 'Desconhecido'
+
+
+def _ler_arquivo(arq: Path) -> pd.DataFrame | None:
+    try:
+        try:
+            if _ler_linha(arq, skiprows=8) == COMP1:
+                return pd.read_csv(arq, skiprows=8, dtype={8: str, 10: str}, **CSV_KWARGS)
+        except Exception:
+            pass
+        try:
+            linha = _ler_linha(arq, skiprows=3)
+            if linha == COMP2:
+                return pd.read_csv(arq, skiprows=3, index_col=False, names=list(range(20)), engine='python', **CSV_KWARGS)
+            elif linha == COMP2_ALT:
+                return pd.read_csv(arq, skiprows=3, index_col=False, names=list(range(21)), engine='python', **CSV_KWARGS)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return None
+
+
+def _escrever_aba(workbook, df: pd.DataFrame, sheet_name: str):
+    """Escreve aba com tema verde dessaturado: cabeçalho em #4A7C59, linhas em verde-acinzentado alternado e subtotal em #2D5240."""
+    VERDE, VERDE_ESC, VERDE1, VERDE2 = '#549E39', '#549E39', '#B7DFA8', '#DBEFD3'
+    TEXTO = '#1A2E22'  # verde escuro dessaturado para texto nas linhas claras
+
+    def _fmt(**kw):
+        return workbook.add_format({'border': 1, 'border_color': 'white', 'valign': 'vcenter', **kw})
+
+    fmt_cab     = _fmt(bold=True, font_color='white', bg_color=VERDE,     align='center')
+    fmt_r1      = _fmt(font_color=TEXTO,              bg_color=VERDE1)
+    fmt_r2      = _fmt(font_color=TEXTO,              bg_color=VERDE2)
+    fmt_r1_val  = _fmt(font_color=TEXTO,              bg_color=VERDE1,    num_format='#,##0.00')
+    fmt_r2_val  = _fmt(font_color=TEXTO,              bg_color=VERDE2,    num_format='#,##0.00')
+    fmt_r1_val_kt = _fmt(font_color='red',            bg_color=VERDE1,    num_format='#,##0.00')
+    fmt_r2_val_kt = _fmt(font_color='red',            bg_color=VERDE2,    num_format='#,##0.00')
+    fmt_tot_lbl = _fmt(bold=True, font_color='white', bg_color=VERDE_ESC)
+    fmt_tot_val = _fmt(bold=True, font_color='white', bg_color=VERDE_ESC, num_format='"R$ "#,##0.00')
+
+    ws   = workbook.add_worksheet(sheet_name)
+    cols = list(df.columns)
+    vidx = cols.index('Valor')
+    tipo_idx = cols.index('Tipo') if 'Tipo' in cols else -1
+    data = df.values
+
+    # Cabeçalho + largura automática
+    for c, name in enumerate(cols):
+        ws.write(0, c, name, fmt_cab)
+        ws.set_column(c, c, max(len(str(name)) + 2, 14))
+
+    # Colunas que devem ser sempre tratadas como texto (não numéricas)
+    cols_texto = {c for c, name in enumerate(cols) if name.lower() in ('blp', 'tipo', 'texto', 'referência', 'nº documento', 'doc.compensação', 'compensaç.', 'empresa', 'fornecedor', 'lneg', 'data doc.', 'vencimento')}
+
+    # Dados com linhas alternadas
+    for r, row in enumerate(data, start=1):
+        par = r % 2 == 0
+        is_kt = tipo_idx >= 0 and row[tipo_idx] == 'KT'
+        for c, val in enumerate(row):
+            if c == vidx:
+                fmt = (fmt_r2_val_kt if par else fmt_r1_val_kt) if is_kt else (fmt_r2_val if par else fmt_r1_val)
+            else:
+                fmt = fmt_r2 if par else fmt_r1
+            if c in cols_texto:
+                ws.write_string(r, c, '' if pd.isna(val) else str(val), fmt)
+            else:
+                ws.write(r, c, val, fmt)
+
+    # Linha de subtotal
+    n        = len(data)
+    vcol_ref = xlsxwriter.utility.xl_col_to_name(vidx)
+    for c in range(len(cols)):
+        if c == 0:
+            ws.write(n + 1, c, 'SUBTOTAL', fmt_tot_lbl)
+        elif c == vidx:
+            ws.write_formula(n + 1, c, f'=SUBTOTAL(9,{vcol_ref}2:{vcol_ref}{n + 1})', fmt_tot_val)
         else:
-            # messagebox.showerror('Erro Na consolidação',f'Formato de arquivo não reconhecido:\n{arq.name}')
-            continue
+            ws.write(n + 1, c, '', fmt_tot_lbl)
 
-        df = tratamento(df)
-        lista_dfs.append(df)
+    ws.autofilter(0, 0, n, len(cols) - 1)
+    ws.freeze_panes(1, 0)
 
-    df_fim = pd.concat(lista_dfs, ignore_index=True)
 
-    with pd.ExcelWriter(arquivo_final, engine='openpyxl') as writer:
-        
-        for marca in df_fim['Empresa'].unique():
-            df_filtrado = df_fim[df_fim['Empresa'] == marca]
-            df_filtrado.to_excel(writer, sheet_name = marca, index=False)
+# ─── Interface Gráfica ───────────────────────────────────────────────────────
 
-    import xlwings as xw
+ROXO, ROXO_HOVER = "#8B5CF6", "#7C3AED"
 
-    arq_xlsx = str(arquivo_final)
-    arq_xlsb = arq_xlsx.replace(".xlsx", ".xlsb")
 
-    app = xw.App(visible=False)
-    wb = app.books.open(arquivo_final)
-    wb.save(arq_xlsb)
-    wb.close()
-    app.quit()
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Gerador de Relatórios SAP")
+        self.geometry("400x500")
+        self.resizable(False, False)
+        self.pasta_selecionada: Path | None = None
 
-    os.remove(arq_xlsx)
-    messagebox.showinfo('Relatório de Pagamento', f'{nome_arquivo} foi gerado com sucesso')
+        ctk.CTkLabel(self, text="Relatório de Pagamento", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(20, 20))
 
-except Exception as e:
-    messagebox.showerror('Erro', f'Seu arquivo não pôde ser gerado:\n{e}')
+        ctk.CTkLabel(self, text="1. Nome do arquivo a ser gerado:").pack(anchor="w", padx=30)
+        self.entrada_nome = ctk.CTkEntry(self, width=340, placeholder_text="Ex: Relatorio_Jan")
+        self.entrada_nome.pack(padx=30, pady=(0, 20))
+
+        ctk.CTkLabel(self, text="2. Selecione a pasta com os dados (.xls):").pack(anchor="w", padx=30)
+        ctk.CTkButton(self, text="Procurar Pasta...", fg_color=ROXO, hover_color=ROXO_HOVER,
+                      command=self.selecionar_pasta).pack(anchor="w", padx=30, pady=(5, 5))
+        self.lbl_pasta_path = ctk.CTkLabel(self, text="Nenhuma pasta selecionada",
+                                           text_color="gray", font=ctk.CTkFont(size=11, slant="italic"))
+        self.lbl_pasta_path.pack(anchor="w", padx=30, pady=(0, 20))
+
+        ctk.CTkLabel(self, text="3. Dividir as abas do Excel por:").pack(anchor="w", padx=30)
+        self.sep_var = ctk.StringVar(value="Empresa")
+        for opcao in ("Empresa", "Fornecedor", "LNeg"):
+            ctk.CTkRadioButton(self, text=opcao, variable=self.sep_var, value=opcao,
+                               fg_color=ROXO, hover_color=ROXO_HOVER).pack(anchor="w", padx=30, pady=5)
+
+        self.btn_processar = ctk.CTkButton(
+            self, text="PROCESSAR E GERAR", fg_color=ROXO, hover_color=ROXO_HOVER,
+            font=ctk.CTkFont(weight="bold", size=14), command=self.iniciar_processamento
+        )
+        self.btn_processar.pack(fill="x", padx=30, pady=(25, 0), ipady=8)
+
+    def selecionar_pasta(self):
+        pasta = filedialog.askdirectory(title="Qual pasta deseja usar?")
+        if pasta:
+            self.pasta_selecionada = Path(pasta)
+            display = str(self.pasta_selecionada)
+            self.lbl_pasta_path.configure(
+                text=("..." + display[-37:] if len(display) > 40 else display),
+                text_color="white"
+            )
+
+    def _resetar_botao(self):
+        self.btn_processar.configure(state="normal", text="PROCESSAR E GERAR")
+
+    def iniciar_processamento(self):
+        if not self.entrada_nome.get():
+            messagebox.showwarning("Aviso", "Por favor, defina o nome do arquivo final no passo 1.")
+            return
+        if not self.pasta_selecionada:
+            messagebox.showwarning("Aviso", "Por favor, selecione a pasta de origem dos arquivos .xls no passo 2.")
+            return
+        self.btn_processar.configure(state="disabled", text="Processando Arquivos... Aguarde")
+        threading.Thread(
+            target=self.processar_dados,
+            args=(self.entrada_nome.get(), self.pasta_selecionada, self.sep_var.get()),
+            daemon=True
+        ).start()
+
+    def processar_dados(self, nome_str: str, pasta_path: Path, agrupador: str):
+        try:
+            arquivo_final = SALVO_EM / Path(nome_str).with_suffix('.xlsx')
+            arqvs = list(pasta_path.rglob('*.xls'))
+
+            if not arqvs:
+                messagebox.showerror('Erro', f'Nenhum arquivo .xls encontrado em:\n{pasta_path}')
+                self._resetar_botao()
+                return
+
+            lista_dfs = [df for arq in arqvs if (df := tratamento(_ler_arquivo(arq))) is not None]  # type: ignore[misc]
+
+            if not lista_dfs:
+                messagebox.showwarning('Aviso', 'Nenhum dado válido encontrado após o processamento.')
+                self._resetar_botao()
+                return
+
+            df_fim = pd.concat(lista_dfs, ignore_index=True)
+
+            workbook = xlsxwriter.Workbook(str(arquivo_final), {'nan_inf_to_errors': True})
+            for valor in df_fim[agrupador].unique():
+                _escrever_aba(workbook, df_fim[df_fim[agrupador] == valor].reset_index(drop=True), _nome_aba(valor))
+            workbook.close()
+
+            messagebox.showinfo('Processo Finalizado!', f'{arquivo_final.stem} foi gerado com sucesso!')
+            self.after(50, self.destroy)
+
+        except Exception as e:
+            messagebox.showerror('Erro Inesperado', f'Um erro interrompeu a geração:\n{e}')
+            self._resetar_botao()
+
+
+if __name__ == "__main__":
+    App().mainloop()
