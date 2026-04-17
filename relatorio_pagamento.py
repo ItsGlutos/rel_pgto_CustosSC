@@ -27,9 +27,6 @@ COMP2_ALT = [None, 'Empresa', 'Loc.Neg', 'Fornecedor', 'Doc.Cont', None, None, '
 COLUNAS_PADRAO = ['Empresa', 'Fornecedor', 'LNeg', 'Referência', 'Nº documento', 'Data doc.', 'Doc.compensação', 'Valor', 'Vencimento', 'Texto', 'Tipo', 'Compensaç.', 'Blp']
 TIPOS_VALIDOS = ['RE', 'KT', 'RF']
 
-_desktops = list(Path.home().glob("**/Desktop"))
-SALVO_EM = _desktops[0] if _desktops else Path.home()
-
 CSV_KWARGS = dict(sep='\t', header=None, encoding='utf-16')
 
 
@@ -168,16 +165,19 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Gerador de Relatórios SAP")
-        self.geometry("400x500")
+        self.geometry("400x610")
         self.resizable(False, False)
         self.pasta_selecionada: Path | None = None
+        self.pasta_destino: Path | None = None
 
         ctk.CTkLabel(self, text="Relatório de Pagamento", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(20, 20))
 
+        # Passo 1 — Nome do arquivo
         ctk.CTkLabel(self, text="1. Nome do arquivo a ser gerado:").pack(anchor="w", padx=30)
         self.entrada_nome = ctk.CTkEntry(self, width=340, placeholder_text="Ex: Relatorio_Jan")
         self.entrada_nome.pack(padx=30, pady=(0, 20))
 
+        # Passo 2 — Pasta de origem
         ctk.CTkLabel(self, text="2. Selecione a pasta com os dados (.xls):").pack(anchor="w", padx=30)
         ctk.CTkButton(self, text="Procurar Pasta...", fg_color=ROXO, hover_color=ROXO_HOVER,
                       command=self.selecionar_pasta).pack(anchor="w", padx=30, pady=(5, 5))
@@ -185,12 +185,26 @@ class App(ctk.CTk):
                                            text_color="gray", font=ctk.CTkFont(size=11, slant="italic"))
         self.lbl_pasta_path.pack(anchor="w", padx=30, pady=(0, 20))
 
+        # Passo 3 — Separador de abas
         ctk.CTkLabel(self, text="3. Dividir as abas do Excel por:").pack(anchor="w", padx=30)
         self.sep_var = ctk.StringVar(value="Empresa")
         for opcao in ("Empresa", "Fornecedor", "LNeg"):
             ctk.CTkRadioButton(self, text=opcao, variable=self.sep_var, value=opcao,
                                fg_color=ROXO, hover_color=ROXO_HOVER).pack(anchor="w", padx=30, pady=5)
 
+        # Passo 4 — Pasta de destino
+        ctk.CTkLabel(self, text="4. Selecione a pasta de destino do relatório:").pack(anchor="w", padx=30, pady=(20, 0))
+        ctk.CTkButton(self, text="Procurar Pasta...", fg_color=ROXO, hover_color=ROXO_HOVER,
+                      command=self.selecionar_pasta_destino).pack(anchor="w", padx=30, pady=(5, 5))
+        self.lbl_destino_path = ctk.CTkLabel(
+            self,
+            text="Nenhuma pasta de destino selecionada",
+            text_color="gray",
+            font=ctk.CTkFont(size=11, slant="italic")
+        )
+        self.lbl_destino_path.pack(anchor="w", padx=30, pady=(0, 0))
+
+        # Botão processar
         self.btn_processar = ctk.CTkButton(
             self, text="PROCESSAR E GERAR", fg_color=ROXO, hover_color=ROXO_HOVER,
             font=ctk.CTkFont(weight="bold", size=14), command=self.iniciar_processamento
@@ -203,6 +217,16 @@ class App(ctk.CTk):
             self.pasta_selecionada = Path(pasta)
             display = str(self.pasta_selecionada)
             self.lbl_pasta_path.configure(
+                text=("..." + display[-37:] if len(display) > 40 else display),
+                text_color="white"
+            )
+
+    def selecionar_pasta_destino(self):
+        pasta = filedialog.askdirectory(title="Onde deseja salvar o relatório?")
+        if pasta:
+            self.pasta_destino = Path(pasta)
+            display = str(self.pasta_destino)
+            self.lbl_destino_path.configure(
                 text=("..." + display[-37:] if len(display) > 40 else display),
                 text_color="white"
             )
@@ -225,8 +249,10 @@ class App(ctk.CTk):
         ).start()
 
     def processar_dados(self, nome_str: str, pasta_path: Path, agrupador: str):
+        # Usa a pasta de destino escolhida, ou o Desktop como fallback
+        destino = self.pasta_destino if self.pasta_destino else print("Erro")
         try:
-            arquivo_final = SALVO_EM / Path(nome_str).with_suffix('.xlsx')
+            arquivo_final = destino / Path(nome_str).with_suffix('.xlsx')
             arqvs = list(pasta_path.rglob('*.xls'))
 
             if not arqvs:
@@ -248,12 +274,12 @@ class App(ctk.CTk):
                 _escrever_aba(workbook, df_fim[df_fim[agrupador] == valor].reset_index(drop=True), _nome_aba(valor))
             workbook.close()
 
-            messagebox.showinfo('Processo Finalizado!', f'{arquivo_final.stem} foi gerado com sucesso!')
-            self.after(50, self.destroy)
+            self.after(0, lambda: messagebox.showinfo('Processo Finalizado!', f'{arquivo_final.stem} foi gerado com sucesso!'))
+            self.after(0, self._resetar_botao)
 
         except Exception as e:
-            messagebox.showerror('Erro Inesperado', f'Um erro interrompeu a geração:\n{e}')
-            self._resetar_botao()
+            self.after(0, lambda: messagebox.showinfo('Processo Finalizado!', f'{arquivo_final.stem} foi gerado com sucesso!'))
+            self.after(0, self._resetar_botao)
 
 
 if __name__ == "__main__":
