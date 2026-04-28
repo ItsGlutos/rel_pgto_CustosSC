@@ -24,6 +24,9 @@ ctk.set_default_color_theme("blue")
 COMP1 = [None, None, 'St', 'Empresa', 'Fornecedo', None, 'LNeg', 'Referência', 'Nº documento', 'Data doc.', 'Doc.compensação', '   Mont.em MI', 'Vencimento', 'Texto', 'Tipo', 'GrpPrevTes', 'Compensaç.', 'BlP', 'Usuário']
 COMP2 = [None, 'Empresa', 'Loc.Neg', 'Fornecedor', 'Doc.Cont', None, None, 'Dat.Doc', 'Referência', 'Dt.Pagto', 'Tp.Doc', 'BIP', 'Montant.MI', 'Texto', 'Doc.Compen', 'Dat.Compen', 'Doc.MIRO', None, 'Dt.Process', 'Msg.LOG']
 COMP2_ALT = [None, 'Empresa', 'Loc.Neg', 'Fornecedor', 'Doc.Cont', None, None, 'Dat.Doc', 'Referência', 'Dt.Pagto', 'Tp.Doc', 'BIP', 'Montant.MI', 'Texto', 'Doc.Compen', 'Dat.Compen', 'Doc.Cont.MIRO', None, None, 'Dt.Process', 'Msg.LOG']
+COMP2_ALT2 = [None, 'Empresa', 'Loc.Neg', 'Fornecedor', 'Doc.Cont', None, None, 'Dat.Doc', 
+              'Referência', 'Dt.Pagto', 'Tp.Doc', 'BIP', 'Montant.MI', 'Texto', 
+              'Doc.Compen', 'Dat.Compen', 'Doc.MIRO', None, 'Dt.Process', 'Mensagem de LOG']
 COLUNAS_PADRAO = ['Empresa', 'Fornecedor', 'LNeg', 'Referência', 'Nº documento', 'Data doc.', 'Doc.compensação', 'Valor', 'Vencimento', 'Texto', 'Tipo', 'Compensaç.', 'Blp']
 TIPOS_VALIDOS = ['RE', 'KT', 'RF']
 
@@ -53,7 +56,7 @@ def tratamento(df: pd.DataFrame | None) -> pd.DataFrame | None:
         df.columns = COLUNAS_PADRAO
         return _formatar_df(df, inverter_valor=True)
 
-    if first_line in (COMP2, COMP2_ALT):
+    if first_line in (COMP2, COMP2_ALT, COMP2_ALT2):
         colunas_remover = df.columns[[0, 5, 6, 16, 17, 18, 19, 20] if first_line == COMP2_ALT else [0, 5, 6, 16, 17, 18, 19]]
         df = df.iloc[1:].reset_index(drop=True).rename(columns={
             1: 'Empresa', 2: 'LNeg', 3: 'Fornecedor', 4: 'Nº documento',
@@ -88,6 +91,8 @@ def _ler_arquivo(arq: Path) -> pd.DataFrame | None:
                 return pd.read_csv(arq, skiprows=3, index_col=False, names=list(range(20)), engine='python', **CSV_KWARGS)
             elif linha == COMP2_ALT:
                 return pd.read_csv(arq, skiprows=3, index_col=False, names=list(range(21)), engine='python', **CSV_KWARGS)
+            elif linha == COMP2_ALT2:
+                return pd.read_csv(arq, skiprows=3, index_col=False, names=list(range(20)), engine='python', **CSV_KWARGS)
         except Exception:
             pass
     except Exception:
