@@ -1,0 +1,125 @@
+# PagFlow Excel
+
+Aplicativo desktop para consolidação e exportação de relatórios de pagamento de transportadores a partir de extratos do SAP.
+
+---
+
+## Visão geral
+
+O PagFlow Excel lê arquivos `.xls` exportados do SAP (texto separado por tabulação, codificação UTF-16), identifica automaticamente o tipo de relatório, aplica o tratamento de dados adequado e gera um único `.xlsx` formatado e pronto para análise ou envio.
+
+O diferencial está em aceitar simultaneamente dois layouts de relatório SAP diferentes na mesma execução — o extrato de fornecedor (FBL1N) e o log de pagamentos (REL_LOG) — sem que o usuário precise separá-los previamente.
+
+---
+
+## Pré-requisitos
+
+- Windows 10 ou superior
+- Não é necessário ter Python instalado — o aplicativo é distribuído como executável (`.exe`)
+
+---
+
+## Instalação
+
+Execute o `instalador_flow.exe`. É comum que o Windows exiba um aviso de segurança ("fornecedor desconhecido") em ambientes corporativos. Clique em **Mais informações** e depois em **Executar mesmo assim** para prosseguir.
+
+> 🚀💸 **[Baixar PagFlow](https://github.com/ItsGlutos/rel_pgto_CustosSC/releases/download/2.1/instalador_flow.exe)** — Windows 10+
+---
+
+## Como usar
+
+A interface é dividida em quatro campos de configuração, preenchidos antes de iniciar o processamento.
+
+**Nome do arquivo**
+Define o nome base do `.xlsx` que será gerado, sem extensão.
+
+**Pasta de origem**
+Pasta onde estão salvos todos os arquivos `.xls` a serem processados. Todos os arquivos da pasta são lidos de uma só vez — FBL1N e REL_LOG podem coexistir sem problema.
+
+**Separar abas por**
+Define como o relatório final será organizado internamente:
+
+| Opção | Comportamento |
+|---|---|
+| Marca | Uma aba por empresa (ex: Santa Cruz, Panpharma) |
+| Fornecedor | Uma aba por código de fornecedor |
+| LNeg | Uma aba por local de negócio |
+| Não Separar | Todos os dados em uma única aba "Dados" |
+
+**Cor do relatório**
+Personalização visual da tabela: Azul, Verde, Roxo ou Vermelho.
+
+**Pasta de destino**
+Onde o `.xlsx` final será salvo.
+
+Após preencher todos os campos, clique em **Processar e Gerar**.
+
+---
+
+## Pipeline interno
+
+```
+Arquivos .xls (pasta de origem)
+        │
+        ▼
+  detectar_relat()
+  ├── Lê as 7 primeiras linhas (UTF-16)
+  ├── Presença de "Nome" → Tipo A (FBL1N), skiprows=8
+  └── Ausência de "Nome" → Tipo B (REL_LOG), skiprows=3
+        │
+        ▼
+  tratamento_fbl1n() ou tratamento_log()
+  ├── Remove colunas "Unnamed" e colunas desnecessárias por índice posicional
+  ├── Renomeia colunas para esquema padrão unificado
+  ├── Converte campo "Valor" via parse_sap_valor()
+  │   └── Trata sinal negativo no fim da string (padrão SAP de créditos)
+  ├── Converte tipos: texto, Int64 e datetime (dd/mm/yyyy)
+  └── Filtra apenas os tipos de documento: RE, KT, RF
+        │
+        ▼
+  Concatenação de todos os DataFrames tratados
+        │
+        ▼
+  exportar_excel()
+  ├── Separa em abas conforme opção escolhida
+  ├── Aplica formatação: zebrado, cabeçalho colorido, bordas
+  ├── Destaca linhas KT em vermelho com fonte branca
+  ├── Adiciona linha de subtotal com fórmula SUM na coluna Valor
+  ├── Ajusta largura de cada coluna automaticamente
+  └── Salva via arquivo temporário → move atomicamente para o destino
+```
+
+---
+
+## Estrutura do repositório
+
+```
+.
+├── main.py          # Interface gráfica (customtkinter) e ponto de entrada
+├── ope.py           # Orquestração: leitura da pasta, concatenação e chamada de exportação
+├── funcoes.py       # Lógica de negócio: detecção, tratamento e exportação
+└── PagFlow.spec     # Configuração do PyInstaller para geração do executável
+```
+
+---
+
+## Tipos de documento processados
+
+| Tipo | Descrição |
+|---|---|
+| KL | Fatura |
+| RE | Documento Contábil |
+| KT | Confissão de Dívida |
+| RF | Nota Fiscal da Seguradora |
+
+Linhas com outros tipos de documento são descartadas no tratamento.
+
+---
+
+## Observações técnicas
+
+Os arquivos `.xls` exportados pelo SAP neste contexto não são planilhas binárias reais — são arquivos de texto com separador de tabulação e codificação UTF-16. A leitura é feita com `pandas.read_csv` e não com `read_excel`, justamente por isso.
+
+Valores monetários no SAP podem vir com o sinal de menos no final da string (ex: `1.500,00-`), formato que o pandas não converte nativamente. A função `parse_sap_valor` trata esse caso antes da conversão numérica.
+
+O arquivo `.xlsx` é escrito primeiro em um caminho temporário e só é movido para o destino final após a conclusão, evitando que o usuário veja um arquivo corrompido ou parcialmente escrito.
