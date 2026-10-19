@@ -1,4 +1,4 @@
-# PagFlow Excel
+# PagFlow
 
 Aplicativo desktop para consolidação e exportação de relatórios de pagamento de transportadores a partir de extratos do SAP.
 
@@ -44,7 +44,7 @@ Define como o relatório final será organizado internamente:
 | Marca | Uma aba por empresa (ex: Santa Cruz, Panpharma) |
 | Fornecedor | Uma aba por código de fornecedor |
 | LNeg | Uma aba por local de negócio |
-| Não Separar | Todos os dados em uma única aba "Dados" |
+| Não Separar | Todos os dados em uma única aba |
 
 **Cor do relatório**
 Personalização visual da tabela: Azul, Verde, Roxo ou Vermelho.
